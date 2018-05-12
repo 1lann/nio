@@ -1,7 +1,13 @@
-// Package nio provides a few buffered io primitives.
-package nio
+// Package snio provides a few buffered io primitives.
+package snio
 
-import "io"
+import (
+	"errors"
+	"io"
+	"time"
+)
+
+var ErrTimeout = errors.New("snio: read timeout")
 
 // Buffer is used to store bytes.
 type Buffer interface {
@@ -37,16 +43,33 @@ func Pipe(buf Buffer) (r *PipeReader, w *PipeWriter) {
 // write to the supplied Buffer. If dst implements ReaderFrom, it is used to read from
 // the supplied Buffer.
 func Copy(dst io.Writer, src io.Reader, buf Buffer) (n int64, err error) {
-	return io.Copy(dst, NewReader(src, buf))
+	return io.Copy(dst, NewReader(src, buf, time.Minute))
 }
 
 // NewReader reads from the buffer which is concurrently filled with data from the passed src.
-func NewReader(src io.Reader, buf Buffer) io.ReadCloser {
+func NewReader(src io.Reader, buf Buffer, timeout time.Duration) io.ReadCloser {
 	r, w := Pipe(buf)
 
 	go func() {
-		_, err := io.Copy(w, src)
-		w.CloseWithError(err)
+		var errStart time.Time
+
+		for {
+			if _, err := io.Copy(w, src); err != nil {
+				if err == io.EOF {
+					if !errStart.IsZero() && time.Since(errStart) >= timeout {
+						w.CloseWithError(ErrTimeout)
+						return
+					} else if errStart.IsZero() {
+						errStart = time.Now()
+					}
+				} else {
+					w.CloseWithError(err)
+					return
+				}
+			} else {
+				errStart = time.Time{}
+			}
+		}
 	}()
 
 	return r

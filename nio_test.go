@@ -1,4 +1,4 @@
-package nio
+package snio
 
 import (
 	"bufio"
