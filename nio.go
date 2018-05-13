@@ -2,6 +2,7 @@
 package snio
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"time"
@@ -54,7 +55,9 @@ func NewReader(src io.Reader, buf Buffer, timeout time.Duration) io.ReadCloser {
 		var errStart time.Time
 
 		for {
-			if _, err := io.Copy(w, src); err != nil {
+			buf := make([]byte, 1000)
+			n, err := src.Read(buf)
+			if err != nil {
 				if err == io.EOF {
 					if !errStart.IsZero() && time.Since(errStart) >= timeout {
 						w.CloseWithError(ErrTimeout)
@@ -68,6 +71,11 @@ func NewReader(src io.Reader, buf Buffer, timeout time.Duration) io.ReadCloser {
 				}
 			} else {
 				errStart = time.Time{}
+			}
+
+			if _, err := io.Copy(w, io.MultiReader(bytes.NewReader(buf[:n]), src)); err != nil {
+				w.CloseWithError(err)
+				return
 			}
 		}
 	}()
